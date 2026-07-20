@@ -64,6 +64,12 @@ Un tableau JSON ; une entrée = un praticien, l'URL de sa page suffit
 Le champ `label` est libre : c'est le nom qui apparaîtra dans les e-mails
 d'alerte (et uniquement là).
 
+Option `"new_patients": true` (Doctolib uniquement) : ne considère la
+réservation « ouverte » que si au moins un motif de consultation est accessible
+aux **nouveaux patients**. Utile pour les centres dont l'agenda en ligne n'est
+ouvert qu'aux patients déjà suivis : l'alerte partira au moment où ils
+accepteront de nouveaux patients.
+
 ## Déploiement sur GitHub Actions
 
 La surveillance tourne dans le cloud toutes les 30 minutes, même PC éteint.

@@ -165,13 +165,18 @@ def doctolib_slug(profile_url: str) -> str:
     return segments[-1]
 
 
-def fetch_doctolib_availability(profile_url: str) -> dict:
+def fetch_doctolib_availability(profile_url: str, new_patients_only: bool = False) -> dict:
     """Vérifie l'état de réservation Doctolib d'un praticien, sans configuration.
 
     1. info.json du tunnel de réservation : HTTP 410 « profile_not_bookable »
        tant que la prise de rendez-vous en ligne est fermée ; HTTP 200 avec les
        motifs et agendas quand elle est ouverte.
     2. Si ouverte : availabilities.json compte les créneaux réels.
+
+    Avec new_patients_only, seuls comptent les motifs accessibles aux nouveaux
+    patients : un centre dont tous les motifs sont réservés aux patients déjà
+    suivis (champ new_patient_restrictions couvrant tous ses agendas) est
+    considéré comme fermé.
     """
     slug = doctolib_slug(profile_url)
     status, info = http_get_json(
@@ -187,12 +192,31 @@ def fetch_doctolib_availability(profile_url: str) -> dict:
 
     data = info.get("data", {})
     agendas = [a for a in data.get("agendas", []) if not a.get("booking_disabled")]
-    agenda_ids = sorted({a["id"] for a in agendas})
-    motive_ids = sorted({m for a in agendas for m in a.get("visit_motive_ids", [])})
-    practice_ids = sorted({a["practice_id"] for a in agendas if a.get("practice_id")})
-    if not agenda_ids or not motive_ids:
-        # Tunnel ouvert mais aucun agenda actif : réservable, zéro créneau.
-        return {"bookable": True, "count": 0, "slots": []}
+
+    # Agendas autorisés par motif.
+    allowed: dict[int, set] = {}
+    for agenda in agendas:
+        for motive_id in agenda.get("visit_motive_ids", []):
+            allowed.setdefault(motive_id, set()).add(agenda["id"])
+
+    if new_patients_only:
+        for motive in data.get("visit_motives", []):
+            restricted: set = set()
+            for restriction in motive.get("new_patient_restrictions") or []:
+                restricted |= set(restriction.get("agenda_ids", []))
+            if motive.get("id") in allowed:
+                allowed[motive["id"]] -= restricted
+
+    allowed = {mid: ids for mid, ids in allowed.items() if ids}
+    if not allowed:
+        # Aucun motif accessible : fermé pour ce que l'on surveille.
+        return {"bookable": not new_patients_only, "count": 0, "slots": []}
+
+    agenda_ids = sorted({i for ids in allowed.values() for i in ids})
+    motive_ids = sorted(allowed)
+    practice_ids = sorted(
+        {a["practice_id"] for a in agendas if a["id"] in set(agenda_ids) and a.get("practice_id")}
+    )
 
     join = lambda ids: "-".join(str(i) for i in ids)  # noqa: E731
     query = urllib.parse.urlencode(
@@ -328,7 +352,9 @@ def main() -> int:
             ids: dict = {}
 
             if platform == "doctolib":
-                result = fetch_doctolib_availability(url)
+                result = fetch_doctolib_availability(
+                    url, new_patients_only=bool(entry.get("new_patients"))
+                )
                 name = label or url
             else:
                 # Les identifiants Maiia sont stables : cache dans state.json.
