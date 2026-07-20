@@ -70,6 +70,12 @@ aux **nouveaux patients**. Utile pour les centres dont l'agenda en ligne n'est
 ouvert qu'aux patients déjà suivis : l'alerte partira au moment où ils
 accepteront de nouveaux patients.
 
+Troisième type, `"platform": "webpage"` : surveille **n'importe quelle page
+web** (site d'un cabinet, page « prise de rendez-vous »…). Le texte visible de
+la page est comparé à chaque passage ; au moindre changement, un e-mail part
+avec le détail des lignes ajoutées et supprimées. Les parties techniques de la
+page (scripts, styles) sont ignorées pour éviter les fausses alertes.
+
 ## Déploiement sur GitHub Actions
 
 La surveillance tourne dans le cloud toutes les 30 minutes, même PC éteint.

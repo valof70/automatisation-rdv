@@ -15,6 +15,9 @@ Aucune dépendance externe : uniquement la bibliothèque standard Python (>= 3.9
 
 from __future__ import annotations
 
+import difflib
+import hashlib
+import html as htmllib
 import json
 import os
 import re
@@ -244,6 +247,75 @@ def fetch_doctolib_availability(profile_url: str, new_patients_only: bool = Fals
 
 
 # --------------------------------------------------------------------------- #
+# Surveillance d'une page web (changement de contenu)
+# --------------------------------------------------------------------------- #
+
+def fetch_webpage_lines(url: str) -> list[str]:
+    """Texte visible d'une page, ligne par ligne, normalisé.
+
+    Les scripts, styles et commentaires sont supprimés (ils contiennent des
+    valeurs techniques qui changent à chaque visite) : seul le contenu lisible
+    par un visiteur est comparé.
+    """
+    page = http_get(url).decode("utf-8", errors="replace")
+    page = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", page, flags=re.S | re.I)
+    page = re.sub(r"<!--.*?-->", " ", page, flags=re.S)
+    page = re.sub(r"<[^>]+>", "\n", page)
+    lines = []
+    for raw in page.splitlines():
+        line = re.sub(r"\s+", " ", htmllib.unescape(raw)).strip()
+        if line:
+            lines.append(line)
+    return lines
+
+
+def check_webpage(url: str, label: str, previous: dict) -> dict:
+    """Compare la page à sa version précédente ; e-mail avec le diff si changement."""
+    lines = fetch_webpage_lines(url)
+    digest = hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+
+    new_state = {
+        "page_hash": digest,
+        "page_lines": lines,
+        "last_check": now_paris().isoformat(timespec="seconds"),
+    }
+
+    if "page_hash" not in previous:
+        print("  Première vérification : contenu de la page enregistré.")
+        return new_state
+    if previous["page_hash"] == digest:
+        print("  Page inchangée.")
+        return new_state
+
+    print("  Changement détecté sur la page !")
+    diff = [
+        line
+        for line in difflib.ndiff(previous.get("page_lines", []), lines)
+        if line.startswith(("+ ", "- "))
+    ]
+    body = [
+        f"Le contenu de la page « {label} » vient de changer.",
+        "",
+        "Modifications (- supprimé / + ajouté) :",
+        *[f"  {d}" for d in diff[:40]],
+    ]
+    if len(diff) > 40:
+        body.append(f"  … et {len(diff) - 40} autres lignes modifiées.")
+    body += ["", f"Voir la page : {url}"]
+
+    try:
+        sent = send_email(f"[RDV] La page a changé — {label}", "\n".join(body))
+    except (smtplib.SMTPException, OSError) as exc:
+        print(f"  [!] Envoi de l'e-mail échoué : {exc}")
+        sent = False
+    if not sent:
+        # E-mail non parti : on garde l'ancienne version pour retenter au prochain run.
+        return previous
+
+    return new_state
+
+
+# --------------------------------------------------------------------------- #
 # Notification e-mail
 # --------------------------------------------------------------------------- #
 
@@ -343,13 +415,22 @@ def main() -> int:
         # on n'y écrit ni nom ni URL de praticien.
         print(f"— Vérification du praticien {index}/{len(practitioners)}")
 
-        platform = entry.get("platform") or (
-            "doctolib" if "doctolib" in url else "maiia"
-        )
+        if entry.get("platform"):
+            platform = entry["platform"]
+        elif "doctolib" in url:
+            platform = "doctolib"
+        elif "maiia" in url:
+            platform = "maiia"
+        else:
+            platform = "webpage"
 
         try:
             previous = state.get(url, {})
             ids: dict = {}
+
+            if platform == "webpage":
+                state[url] = check_webpage(url, label or "page surveillée", previous)
+                continue
 
             if platform == "doctolib":
                 result = fetch_doctolib_availability(
