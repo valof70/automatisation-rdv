@@ -1,0 +1,12 @@
+[
+  {
+    "label": "Dr Prénom NOM (psychiatre, Ville)",
+    "platform": "maiia",
+    "url": "https://www.maiia.com/psychiatre/00000-ville/prenom-nom"
+  },
+  {
+    "label": "Dr Prénom NOM (psychiatre, Ville)",
+    "platform": "doctolib",
+    "url": "https://www.doctolib.fr/psychiatre/ville/prenom-nom/booking"
+  }
+]

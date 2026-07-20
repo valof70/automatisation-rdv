@@ -1,0 +1,66 @@
+name: Surveillance RDV
+
+on:
+  schedule:
+    # Toutes les 30 minutes (heure UTC). GitHub peut décaler l'exécution de quelques minutes.
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: surveillance-rdv
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Installer Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # L'état de surveillance est conservé dans le cache privé d'Actions
+      # (jamais committé : il contient les praticiens surveillés).
+      - name: Restaurer l'état précédent
+        uses: actions/cache/restore@v4
+        with:
+          path: state.json
+          key: state-${{ github.run_id }}
+          restore-keys: |
+            state-
+
+      - name: Vérifier les disponibilités
+        env:
+          PRACTITIONERS_JSON: ${{ secrets.PRACTITIONERS_JSON }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: python monitor.py
+
+      - name: Sauvegarder l'état
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state.json
+          key: state-${{ github.run_id }}
+
+      # GitHub désactive les crons après 60 jours sans commit : on committe une
+      # fois par jour un fichier témoin anonyme pour garder le dépôt actif.
+      - name: Maintenir le dépôt actif
+        run: |
+          date -u +%F > .keepalive
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .keepalive
+          if ! git diff --cached --quiet; then
+            git commit -m "Journal d'activité [skip ci]"
+            git push
+          fi

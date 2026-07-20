@@ -1,0 +1,11 @@
+# Identifiants e-mail : jamais dans le dépôt
+.env
+
+# Données personnelles (praticiens surveillés, état) : jamais dans le dépôt.
+# Sur GitHub Actions : secret PRACTITIONERS_JSON + cache pour state.json.
+practitioners.json
+state.json
+
+# Python
+__pycache__/
+*.pyc
