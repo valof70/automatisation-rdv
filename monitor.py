@@ -52,8 +52,8 @@ SEARCH_DAYS = 90
 # Utilitaires HTTP / configuration
 # --------------------------------------------------------------------------- #
 
-def http_get(url: str) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+def http_get(url: str, headers: dict | None = None) -> bytes:
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
     with urllib.request.urlopen(req, timeout=30) as resp:
         return resp.read()
 
@@ -231,7 +231,29 @@ def fetch_doctolib_availability(profile_url: str, new_patients_only: bool = Fals
             "limit": 7,
         }
     )
-    avail = json.loads(http_get(f"{DOCTOLIB_BASE}/availabilities.json?{query}"))
+    # availabilities.json est protégé par Datadome, qui bloque les IP de
+    # datacenter (403 depuis GitHub Actions) alors qu'info.json passe. On tente
+    # avec des en-têtes de navigateur ; en cas de refus, on signale simplement
+    # « réservation ouverte » sans compter les créneaux plutôt que d'échouer.
+    try:
+        avail = json.loads(
+            http_get(
+                f"{DOCTOLIB_BASE}/availabilities.json?{query}",
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                        " (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+                    ),
+                    "Accept": "application/json",
+                    "Referer": f"{DOCTOLIB_BASE}/",
+                },
+            )
+        )
+    except urllib.error.HTTPError as exc:
+        if exc.code == 403:
+            print("  [!] availabilities.json refusé (403) : créneaux non comptés.")
+            return {"bookable": True, "count": 0, "slots": []}
+        raise
 
     total = int(avail.get("total", 0))
     slots: list[str] = []
