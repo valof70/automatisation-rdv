@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import difflib
 import hashlib
-import http.cookiejar
 import html as htmllib
 import json
 import os
@@ -56,33 +55,6 @@ SEARCH_DAYS = 90
 def http_get(url: str, headers: dict | None = None) -> bytes:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
     with urllib.request.urlopen(req, timeout=30) as resp:
-        return resp.read()
-
-
-BROWSER_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        " (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-    ),
-    "Accept": "application/json",
-    "Accept-Language": "fr-FR,fr;q=0.9",
-}
-
-
-def http_get_with_session(url: str, referer: str) -> bytes:
-    """GET précédé d'une visite de `referer` pour récupérer ses cookies.
-
-    Datadome laisse passer les pages HTML publiques mais refuse (403) les appels
-    API dépourvus du cookie de session qu'elles délivrent. On charge donc la
-    page du praticien, on garde ses cookies, puis on rejoue la requête API.
-    """
-    jar = http.cookiejar.CookieJar()
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
-    headers = {**BROWSER_HEADERS, "Accept": "text/html,application/xhtml+xml"}
-    with opener.open(urllib.request.Request(referer, headers=headers), timeout=30) as resp:
-        resp.read()
-    request = urllib.request.Request(url, headers={**BROWSER_HEADERS, "Referer": referer})
-    with opener.open(request, timeout=30) as resp:
         return resp.read()
 
 
@@ -259,29 +231,29 @@ def fetch_doctolib_availability(profile_url: str, new_patients_only: bool = Fals
             "limit": 7,
         }
     )
-    # availabilities.json est protégé par Datadome, qui refuse (403) les appels
-    # dépourvus de cookie de session depuis les IP de datacenter alors qu'
-    # info.json passe. On tente d'abord l'appel direct, puis le même appel
-    # précédé d'une visite de la page publique du praticien pour en récupérer
-    # les cookies. Si les deux échouent, on signale « réservation ouverte »
-    # sans compter les créneaux plutôt que de faire échouer la surveillance.
-    avail_url = f"{DOCTOLIB_BASE}/availabilities.json?{query}"
-    avail = None
-    for attempt in ("direct", "session"):
-        try:
-            if attempt == "direct":
-                raw = http_get(avail_url, headers={**BROWSER_HEADERS, "Referer": f"{DOCTOLIB_BASE}/"})
-            else:
-                raw = http_get_with_session(avail_url, profile_url)
-            avail = json.loads(raw)
-            break
-        except urllib.error.HTTPError as exc:
-            if exc.code != 403:
-                raise
-            if attempt == "session":
-                print("  [!] availabilities.json refusé (403) : créneaux non comptés.")
-                return {"bookable": True, "count": 0, "slots": []}
-            print("  [!] availabilities.json refusé (403) : nouvel essai avec cookies de session.")
+    # availabilities.json est protégé par Datadome, qui bloque les IP de
+    # datacenter (403 depuis GitHub Actions) alors qu'info.json passe. On tente
+    # avec des en-têtes de navigateur ; en cas de refus, on signale simplement
+    # « réservation ouverte » sans compter les créneaux plutôt que d'échouer.
+    try:
+        avail = json.loads(
+            http_get(
+                f"{DOCTOLIB_BASE}/availabilities.json?{query}",
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                        " (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+                    ),
+                    "Accept": "application/json",
+                    "Referer": f"{DOCTOLIB_BASE}/",
+                },
+            )
+        )
+    except urllib.error.HTTPError as exc:
+        if exc.code == 403:
+            print("  [!] availabilities.json refusé (403) : créneaux non comptés.")
+            return {"bookable": True, "count": 0, "slots": []}
+        raise
 
     total = int(avail.get("total", 0))
     slots: list[str] = []
