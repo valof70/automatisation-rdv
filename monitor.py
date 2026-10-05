@@ -342,11 +342,13 @@ def check_webpage(url: str, label: str, previous: dict) -> dict:
 # --------------------------------------------------------------------------- #
 
 def send_email(subject: str, body: str) -> bool:
-    host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-    port = int(os.environ.get("SMTP_PORT", "465"))
+    # « or » et non une valeur par défaut de get() : un secret GitHub facultatif
+    # non défini arrive comme chaîne vide, pas comme variable absente.
+    host = os.environ.get("SMTP_HOST") or "smtp.gmail.com"
+    port = int(os.environ.get("SMTP_PORT") or "465")
     user = os.environ.get("SMTP_USER")
     password = os.environ.get("SMTP_PASSWORD")
-    recipient = os.environ.get("MAIL_TO", user)
+    recipient = os.environ.get("MAIL_TO") or user
 
     if not user or not password:
         print("  [!] SMTP_USER / SMTP_PASSWORD non configurés : e-mail non envoyé.")
